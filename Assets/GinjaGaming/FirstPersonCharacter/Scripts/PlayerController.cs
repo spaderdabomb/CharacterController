@@ -28,6 +28,7 @@ namespace GinjaGaming.FirstPersonCharacterController
         public float runSpeed = 4f;
         public float sprintAcceleration = 0.5f;
         public float sprintSpeed = 7f;
+        public float inAirAcceleration = 0.15f;
         public float drag = 0.1f;
         public float gravity = 25f;
         public float jumpSpeed = 1.0f;
@@ -64,7 +65,6 @@ namespace GinjaGaming.FirstPersonCharacterController
         private bool _jumpPressed = false;
         private bool _jumpedLastFrame = false;
         private float _rotatingToTargetTimer = 0f;
-        private float _groundedTimer = 0;
         private float _verticalVelocity = 0f;
         #endregion
 
@@ -104,112 +104,34 @@ namespace GinjaGaming.FirstPersonCharacterController
         private void HandleVerticalMovement()
         {
             bool isGrounded = _playerState.InGroundedState();
-            bool isFalling = _playerState.CurrentPlayerMovementState == PlayerMovementState.Falling;
-
-            float groundedGravity = (isGrounded && !_jumpPressed && !isFalling) ? slopeForce : 0f;
-
-            // Setup grounded timer to prevent jumping in consecutive frames
-            if (isGrounded)
-                _groundedTimer = 0.2f;
-
-            if (_groundedTimer > 0)
-                _groundedTimer -= Time.deltaTime;
-
-            if (isGrounded && _verticalVelocity < 0)
-                _verticalVelocity = 0f;
-
-            _verticalVelocity -= (gravity + groundedGravity) * Time.deltaTime;
-
-            if (_jumpPressed && _groundedTimer > 0)
-            {
-                _verticalVelocity += Mathf.Sqrt(jumpSpeed * 3 * gravity);
-
-                _groundedTimer = 0;
-                _jumpPressed = false;
-                _jumpedLastFrame = true;
-            }
-        }
-
-        private void HandleVerticalMovement2()
-        {
-            bool isGrounded = _playerState.InGroundedState();
-
-            // Setup grounded timer to prevent jumping in consecutive frames
-            if (isGrounded)
-                _groundedTimer = 0.2f;
-
-            if (_groundedTimer > 0)
-                _groundedTimer -= Time.deltaTime;
 
             if (isGrounded && _verticalVelocity < 0)
                 _verticalVelocity = 0f;
 
             _verticalVelocity -= gravity * Time.deltaTime;
 
-            if (_jumpPressed && _groundedTimer > 0)
+            if (_jumpPressed)
             {
                 _verticalVelocity += Mathf.Sqrt(jumpSpeed * 3 * gravity);
 
-                _groundedTimer = 0;
                 _jumpPressed = false;
                 _jumpedLastFrame = true;
             }
         }
 
-        private void HandleLateralMovement()
-        {
-            bool isSprinting = _playerState.CurrentPlayerMovementState == PlayerMovementState.Sprinting;
-            bool isWalking = _playerState.CurrentPlayerMovementState == PlayerMovementState.Walking;
-
-            // State dependent acceleration and speed
-            float currentLateralAcceleration = isWalking ? walkAcceleration : 
-                                               isSprinting ? sprintAcceleration : runAcceleration;
-
-            float clampLateralVelocityMagnitude = isWalking ? walkSpeed : 
-                                                  isSprinting ? sprintSpeed : runSpeed;
-
-            // Get lateral movement from input
-            Vector3 lateralVelocity = new Vector3(CharacterController.velocity.x, 0f, CharacterController.velocity.z);
-            Vector3 cameraForwardProjectedXZ = new Vector3(PlayerCamera.transform.forward.x, 0f, PlayerCamera.transform.forward.z).normalized;
-            Vector3 cameraRightProjectedXZ = new Vector3(PlayerCamera.transform.right.x, 0f, PlayerCamera.transform.right.z).normalized;
-            Vector3 movementDirection = cameraRightProjectedXZ * MovementInput.x + cameraForwardProjectedXZ * MovementInput.y;
-            Vector3 movementDelta = movementDirection * currentLateralAcceleration;
-
-            // Clamp velocity to 0 if barely moving and not using input
-            if (lateralVelocity.magnitude < movingThreshold && MovementInput == Vector2.zero)
-            {
-                lateralVelocity = Vector3.zero;
-            }
-
-            lateralVelocity += movementDelta;
-
-            Vector3 playerVelocityNew = Vector3.zero;
-            playerVelocityNew += lateralVelocity;
-            playerVelocityNew -= playerVelocityNew.normalized * drag;
-            playerVelocityNew = (playerVelocityNew.magnitude > drag) ? playerVelocityNew : Vector3.zero;
-            playerVelocityNew = Vector3.ClampMagnitude(playerVelocityNew, clampLateralVelocityMagnitude);
-
-            playerVelocityNew.y = _verticalVelocity;
-
-            CharacterController.Move(playerVelocityNew * Time.deltaTime);
-        }
-
         private Vector3 GetCharacterControllerNormal()
         {
-            // Get normal
-            Vector3 normal = Vector3.zero;
-            RaycastHit[] hits;
-            hits = Physics.RaycastAll(transform.position, Vector3.down, 0.1f, _groundLayers);
-            for (int i = 0; i < hits.Length; i++)
+            Vector3 normal = Vector3.up;
+            RaycastHit hit;
+            if (Physics.Raycast(transform.position + CharacterController.center, Vector3.down, out hit, CharacterController.center.y + 0.1f, _groundLayers))
             {
-                RaycastHit hit = hits[i];
-                normal = hit.normal;
+                normal = Vector3.Angle(hit.normal, Vector3.up) <= CharacterController.slopeLimit ? hit.normal : Vector3.up;
             }
 
             return normal;
         }
 
-        private void HandleLateralMovement2()
+        private void HandleLateralMovement()
         {
             bool isGrounded = _playerState.InGroundedState();
             bool isSprinting = _playerState.CurrentPlayerMovementState == PlayerMovementState.Sprinting;
@@ -217,10 +139,12 @@ namespace GinjaGaming.FirstPersonCharacterController
 
             // State dependent acceleration and speed
             float currentLateralAcceleration = isWalking ? walkAcceleration :
-                                               isSprinting ? sprintAcceleration : runAcceleration;
+                                               isSprinting ? sprintAcceleration : 
+                                               !isGrounded ? inAirAcceleration : runAcceleration;
 
             float clampLateralVelocityMagnitude = isWalking ? walkSpeed :
-                                                  isSprinting ? sprintSpeed : runSpeed;
+                                                  isSprinting ? sprintSpeed : 
+                                                  !isGrounded ? sprintSpeed : runSpeed;
 
             // Get lateral movement from input
             Vector3 lateralVelocity = CharacterController.velocity;
